@@ -114,6 +114,85 @@ def concat_results():
     dfs = [pd.read_csv("all_race_results_"+str(i)+".csv") for i in range(0, 14)]
     result = pd.concat(dfs)
     result.to_csv("all_race_results.csv")
-    
+
+def scrape_horse_profile_links():
+    def get_links(page_source):
+        result = []
+        soup = BeautifulSoup(page_source, "lxml")
+        for div in soup.findAll("div", class_="result-rows"):
+            result.append(div.find("a")['href'])
+        return result
+    url = "https://www.scmp.com/sport/racing/stats/horses"
+    driver=webdriver.Firefox()
+    driver.get(url)
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CLASS_NAME, "search-index")))
+    aplha_selector = driver.find_element_by_class_name("search-index")
+    links = []
+    links.extend(get_links(driver.page_source))
+
+    for i in range(2, 27):
+        btn = aplha_selector.find_element_by_xpath(f"li[{i}]")
+        btn.click()
+        links.extend(get_links(driver.page_source))
+        get_links(driver.page_source)
+    driver.close()
+    return links
+
+def scrape_horse_profile(link):
+    print(link)
+    time.sleep(2)
+    res = requests.get(link)
+    if res.status_code != 200:
+        print(f"{res.status_code}")
+        raise requests.HTTPError
+    soup = BeautifulSoup(res.content, "lxml")
+    info = soup.find("div", class_ = "profile-panel").find("div", class_ = "wrapper")
+    header = info.find("div", class_ = "header")
+    name = header.h1.get_text().split("(")[0].strip()
+    code = header.h1.get_text().split("(")[1].split(")")[0]
+    trainer = header.h2.get_text().split("/")[0].strip()
+    rating = header.h2.get_text().split(":")[1].strip()
+    details = info.find("div", class_="details")
+    p=details.get_text().split("\n")
+
+    result = {}
+    for line in p:
+        print(line)
+        if line.startswith("Import Type / Colour / Sex / Age / Country of Origin"):
+            genes = line.split(":")[1]
+            words = [s.strip() for s in genes.split("/")]
+            result["import_type"] = words[0]
+            result["color"] = words[1]
+            result["sex"] = words[2]
+            result["age"] = words[3]
+            result["country_of_origin"] = words[4]
+        elif line.startswith("Bloodline Relations:"):
+            result["relations"] = line.split(":")[1]
+        elif line.startswith("Owner:"):
+            result["owner"] = line.split(":")[1]
+        elif line.startswith("Sire:"):
+            result["sire"] = line.split(":")[1]
+        elif line.startswith("Dam:"):
+            result["dam"] = line.split(":")[1]
+        elif line.startswith("Health:"):
+            result["health"] = line.split(":")[1]
+
+    # print(f"{name}\n{code}\n{trainer}\n{rating}\n{p}")
+    # print(f"Parsed\n{relations}\n{owner}\n{sire}\n{dam}\n{genes}\n{words}\n{import_type}\n{color}\n{sex}\n{age}\n{country_of_origin}")
+    return result
+
+def scrape_all_horse_profiles(start=0):
+    try:    
+        df = pd.DataFrame()
+        links = scrape_horse_profile_links()
+        for link in links[start:]:
+            horse_profile = scrape_horse_profile("https://www.scmp.com" + link)
+            df.append(horse_profile, ignore_index=True)
+            start=start+1
+        df.to_csv("data/horse_profiles.csv", index=False)
+    except requests.HTTPError:
+        time.sleep(8)
+        df.to_csv(f"data/horse_profiles{start}.csv", index=False)
+        scrape_all_horse_profiles(start=start)
 if __name__ == "__main__":
-    concat_results()    
+    scrape_all_horse_profiles(start=278)
